@@ -18,11 +18,6 @@ public @interface RateLimiter {
     LimitingTypeEnum limitType() default LimitingTypeEnum.MAX_TIME_WINDOW;
 
     /**
-     *
-     * 请求令牌数
-     */
-    int permits() default 100;
-    /**
      * 单位时间限制通过请求数
      * @return
      */

@@ -11,21 +11,18 @@ import org.aspectj.lang.annotation.Pointcut;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.scripting.support.ResourceScriptSource;
 import org.springframework.stereotype.Component;
-import org.springframework.web.method.HandlerMethod;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
-import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
-import java.util.Set;
 
 /**
  * 限流处理器
@@ -67,45 +64,40 @@ public class RateLimiterHandler {
         List<String> keyList = new ArrayList<>(4);
         Signature signature = proceedingJoinPoint.getSignature();
         Class<?> targetClass = proceedingJoinPoint.getTarget().getClass();
-        RateLimiter rateLimiter = targetClass.getAnnotation(RateLimiter.class);
-        if (rateLimiter == null){ //如果类上没有注解
-            if (targetClass.isAnnotationPresent(RateLimiter.class)){
-                //判断父类是否有注解
-                Method[] methods = targetClass.getDeclaredMethods();
-                for (Method method : methods){
-                    if (method.isAnnotationPresent(RateLimiter.class)){
-                        rateLimiter = method.getAnnotation(RateLimiter.class);
-                        String limitKey = RedisKeyMagic.WINDOW_RATE_LIMITER_PREFIX+":"+targetClass.getName()+":"+ method.getName();
-                        keyList.add(limitKey);
-                    }
-                }
+        RateLimiter rateLimiter;
+        if (signature instanceof MethodSignature){
+            MethodSignature methodSignature = (MethodSignature) signature;
+            Method method = targetClass.getMethod(methodSignature.getName(),methodSignature.getParameterTypes());
+            String limitKey = RedisKeyMagic.WINDOW_RATE_LIMITER_PREFIX+":"+targetClass.getName()+":"+ method.getName();
+            keyList.add(limitKey);
+            if (method.isAnnotationPresent(RateLimiter.class)){
+                //如果方法里有该注解
+                rateLimiter = method.getAnnotation(RateLimiter.class);
+                return executeMaxTimeWindow(proceedingJoinPoint,rateLimiter,keyList);
             }else {
-                if (signature instanceof MethodSignature){
-                    MethodSignature methodSignature = (MethodSignature) signature;
-                    Method method = targetClass.getMethod(methodSignature.getName(),methodSignature.getParameterTypes());
-                    rateLimiter = method.getAnnotation(RateLimiter.class);
-                    if (method.isAnnotationPresent(RateLimiter.class)){
-                        String limitKey = RedisKeyMagic.WINDOW_RATE_LIMITER_PREFIX+":"+targetClass.getName()+":"+ method.getName();
-                        keyList.add(limitKey);
+                //类上是否有该注解
+                rateLimiter = targetClass.getAnnotation(RateLimiter.class);
+                if(rateLimiter == null){
+                    //父类是否有该注解
+                    if (targetClass.isAnnotationPresent(RateLimiter.class)){
+                        rateLimiter = targetClass.getAnnotatedSuperclass().getAnnotation(RateLimiter.class);
+                        if (rateLimiter != null){
+                            return executeMaxTimeWindow(proceedingJoinPoint,rateLimiter,keyList);
+                        }
                     }
+                }else {
+                   return executeMaxTimeWindow(proceedingJoinPoint,rateLimiter,keyList);
                 }
             }
-        }else {
-            Method[] methods = targetClass.getDeclaredMethods();
-            for (Method method : methods){
-                String limitKey = RedisKeyMagic.WINDOW_RATE_LIMITER_PREFIX+":"+targetClass.getName()+":"+ method.getName();
-                keyList.add(limitKey);
-            }
-        }
-        if (rateLimiter.limitType() == LimitingTypeEnum.MAX_TIME_WINDOW){
-            redisScript.setScriptSource(new ResourceScriptSource(new ClassPathResource("max-time-window.lua")));
-            return executeMaxTimeWindow(proceedingJoinPoint,rateLimiter,keyList);
-        }else {
-            redisScript.setScriptSource(new ResourceScriptSource(new ClassPathResource("token-bucket.lua")));
         }
         return proceedingJoinPoint.proceed();
     }
     public Object executeMaxTimeWindow(ProceedingJoinPoint proceedingJoinPoint,RateLimiter rateLimiter,List<String> keyList)throws Throwable{
+        if (rateLimiter.limitType() == LimitingTypeEnum.MAX_TIME_WINDOW){
+            redisScript.setScriptSource(new ResourceScriptSource(new ClassPathResource("max-time-window.lua")));
+        }else {
+            redisScript.setScriptSource(new ResourceScriptSource(new ClassPathResource("token-bucket.lua")));
+        }
         // 限流阈值
         long limitTimes = rateLimiter.limit();
         // 限流超时时间
