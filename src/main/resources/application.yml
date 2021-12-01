@@ -1,0 +1,16 @@
+server:
+  port: 8080
+#redis
+spring:
+  redis:
+    hostName: 172.30.50.4
+    host: 172.30.50.4
+    port: 6379
+    pool:
+      maxActive: 8
+      maxWait: -1
+      maxIdle: 8
+      minIdle: 0
+      timeout: 10000
+      password:
+
